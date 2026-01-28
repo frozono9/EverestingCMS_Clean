@@ -97,10 +97,10 @@ def check_password():
             submit = st.form_submit_button("Login")
             
             if submit:
-                # Try to get credentials from streamlit secrets first (for cloud deployment)
-                # Then fall back to environment variables (for local development)
-                correct_username = st.secrets.get("ADMIN_USERNAME") or os.getenv("ADMIN_USERNAME")
-                correct_password = st.secrets.get("ADMIN_PASSWORD") or os.getenv("ADMIN_PASSWORD")
+                # Try to get credentials from environment variables first (for local development with .env)
+                # Then fall back to streamlit secrets (for cloud deployment)
+                correct_username = os.getenv("ADMIN_USERNAME") or st.secrets.to_dict().get("ADMIN_USERNAME")
+                correct_password = os.getenv("ADMIN_PASSWORD") or st.secrets.to_dict().get("ADMIN_PASSWORD")
                 
                 if not correct_username or not correct_password:
                     st.error("Authentication configuration missing. Please check Secrets or .env file.")
@@ -145,7 +145,7 @@ def main():
         st.subheader("Navigation")
         choice = st.radio(
             "Manage Data",
-            ["Challenges", "Collections", "Assign", "Users", "Activities"],
+            ["Challenges", "Collections", "Database"],
             index=0
         )
         st.divider()
@@ -269,14 +269,15 @@ def main():
                         st.rerun()
 
     elif choice == "Collections":
-        st.header("Collections")
-        tab_view, tab_new = st.tabs(["📁 Active Collections", "➕ New Collection"])
+        st.header("Collections Management")
+        tab_view, tab_new, tab_modify = st.tabs(["📋 View Collections", "➕ Create Collection", "🔧 Modify Collection"])
         
-        with tab_view:
-            collections = get_all(Collection)
-            challenges = get_all(Challenge)
-            id_to_title = {str(c.id): c.title for c in challenges}
+        collections = get_all(Collection)
+        challenges = get_all(Challenge)
+        challenge_map = {c.title: str(c.id) for c in challenges}
+        id_to_title = {str(c.id): c.title for c in challenges}
 
+        with tab_view:
             if collections:
                 # Header Row
                 col_c1, col_c2, col_c3 = st.columns([3, 6, 1])
@@ -304,103 +305,141 @@ def main():
                 st.info("No collections defined.")
 
         with tab_new:
-            with st.form("new_coll_form"):
-                st.subheader("Create Collection")
-                new_title = st.text_input("Name", placeholder="e.g. Summer Series")
+            with st.form("new_coll_form_updated"):
+                st.subheader("Create New Collection")
+                new_title = st.text_input("Collection Name", placeholder="e.g. Summer Series")
+                selected_challenges = st.multiselect(
+                    "Select Challenges to Include",
+                    options=list(challenge_map.keys())
+                )
                 if st.form_submit_button("Create Collection"):
                     if new_title:
-                        create_item(Collection, {"title": new_title, "channel_ids": []})
-                        st.toast("Collection created!", icon="📁")
+                        new_ids = [challenge_map[t] for t in selected_challenges]
+                        create_item(Collection, {"title": new_title, "channel_ids": new_ids})
+                        st.toast("Collection created with selected challenges!", icon="📁")
                         st.rerun()
                     else:
                         st.error("Name is required")
 
-    elif choice == "Assign":
-        st.header("Manage Content Assignments")
-        st.info("Assign challenges to collections. Changes are saved per collection.")
+        with tab_modify:
+            if not collections:
+                st.info("No collections to modify.")
+            else:
+                selected_coll_title = st.selectbox(
+                    "Select Collection to Modify",
+                    options=[c.title for c in collections]
+                )
+                
+                selected_coll = next(c for c in collections if c.title == selected_coll_title)
+                
+                with st.form(f"modify_coll_{selected_coll.id}"):
+                    edit_title = st.text_input("Edit Name", value=selected_coll.title)
+                    current_ids = getattr(selected_coll, "channel_ids", []) or []
+                    current_titles = [id_to_title.get(cid, cid) for cid in current_ids if cid in id_to_title]
+                    
+                    edit_challenges = st.multiselect(
+                        "Modify Included Challenges",
+                        options=list(challenge_map.keys()),
+                        default=current_titles
+                    )
+                    
+                    if st.form_submit_button("Save Changes"):
+                        new_ids = [challenge_map[t] for t in edit_challenges]
+                        with SessionLocal() as session:
+                            db_coll = session.get(Collection, selected_coll.id)
+                            if db_coll:
+                                db_coll.title = edit_title
+                                db_coll.channel_ids = new_ids
+                                session.commit()
+                                st.toast(f"Updated {edit_title}", icon="💾")
+                                st.rerun()
+
+    elif choice == "Database":
+        st.header("Database Explorer")
         
-        collections = get_all(Collection)
-        challenges = get_all(Challenge)
+        tab_users, tab_activities, tab_collections, tab_challenges = st.tabs([
+            "👥 Users", "🚴 Activities", "📁 Collections", "🏔️ Challenges"
+        ])
         
-        if not collections or not challenges:
-            st.warning("Please ensure both Collections and Challenges exist before assigning.")
-        else:
-            challenge_map = {c.title: str(c.id) for c in challenges}
+        with tab_users:
+            users = get_all(User)
+            if users:
+                u_col1, u_col2, u_col3, u_col4 = st.columns([2, 3, 2, 2])
+                u_col1.markdown("**Full Name**")
+                u_col2.markdown("**Email**")
+                u_col3.markdown("**Strava Link**")
+                u_col4.markdown("**Date Joined**")
+                st.divider()
+                for u in users:
+                    r_u1, r_u2, r_u3, r_u4 = st.columns([2, 3, 2, 2])
+                    r_u1.write(f"{u.name} {u.last_name}")
+                    r_u2.write(u.email or "—")
+                    r_u3.write(f"[Profile](https://strava.com/athletes/{u.strava_id})" if u.strava_id else "—")
+                    r_u4.write(u.created_at.strftime("%Y-%m-%d %H:%M") if u.created_at else "—")
+            else:
+                st.info("No users found in database.")
+
+        with tab_activities:
+            activities = get_all(Activity)
+            if activities:
+                a_col1, a_col2, a_col3, a_col4 = st.columns([1, 2, 1, 2])
+                a_col1.markdown("**User ID**")
+                a_col2.markdown("**Climb**")
+                a_col3.markdown("**Elevation**")
+                a_col4.markdown("**Timestamp**")
+                st.divider()
+                for a in activities:
+                    r_a1, r_a2, r_a3, r_a4 = st.columns([1, 2, 1, 2])
+                    r_a1.code(str(a.user_id)[:8])
+                    r_a2.write(a.climb_name or "—")
+                    r_a3.write(f"{a.elevation:,.0f} m")
+                    r_a4.write(a.created_at.strftime("%Y-%m-%d %H:%M") if a.created_at else "—")
+            else:
+                st.info("No activities/challenges found.")
+
+        with tab_collections:
+            collections = get_all(Collection)
+            challenges = get_all(Challenge)
             id_to_title = {str(c.id): c.title for c in challenges}
             
-            # 2-column layout for assignment cards
-            cols = st.columns(2)
-            for i, coll in enumerate(collections):
-                with cols[i % 2]:
-                    st.markdown(f"""
-                        <div class="data-card">
-                            <h3 style="margin-top:0;">📁 {coll.title}</h3>
-                        </div>
-                    """, unsafe_allow_html=True)
-                    
-                    with st.container():
-                        current_ids = getattr(coll, "channel_ids", []) or []
-                        current_titles = [id_to_title.get(cid, cid) for cid in current_ids]
-                        
-                        selected_titles = st.multiselect(
-                            "Included Challenges",
-                            options=list(challenge_map.keys()),
-                            default=[t for t in current_titles if t in challenge_map],
-                            key=f"assign_{coll.id}"
-                        )
-                        
-                        btn_col1, btn_col2 = st.columns([2, 1])
-                        if btn_col1.button("Save Changes", key=f"save_{coll.id}"):
-                            new_ids = [challenge_map[t] for t in selected_titles]
-                            with SessionLocal() as session:
-                                db_coll = session.get(Collection, coll.id)
-                                if db_coll:
-                                    db_coll.channel_ids = new_ids
-                                    session.commit()
-                                    st.toast(f"Updated {coll.title}", icon="💾")
-                                    st.rerun()
-                        st.divider()
+            if collections:
+                c1, c2, c3 = st.columns([3, 6, 1])
+                c1.markdown("**Collection Name**")
+                c2.markdown("**Assigned Challenges**")
+                c3.markdown("")
+                st.divider()
+                for c in collections:
+                    r1, r2, r3 = st.columns([3, 6, 1])
+                    r1.write(f"**{c.title}**")
+                    channel_ids = getattr(c, "channel_ids", []) or []
+                    titles = [id_to_title.get(cid, cid) for cid in channel_ids]
+                    r2.write(", ".join(titles) if titles else "—")
+                    with r3:
+                        if st.button("🗑️", key=f"db_del_coll_{c.id}"):
+                            delete_item(Collection, c.id)
+                            st.toast(f"Collection deleted", icon="🗑️")
+                            st.rerun()
+            else:
+                st.info("No collections found.")
 
-    elif choice == "Users":
-        st.header("User Registry")
-        users = get_all(User)
-        if users:
-            # Table-like view with custom columns
-            u_col1, u_col2, u_col3, u_col4 = st.columns([2, 3, 2, 2])
-            u_col1.markdown("**Full Name**")
-            u_col2.markdown("**Email**")
-            u_col3.markdown("**Strava Link**")
-            u_col4.markdown("**Date Joined**")
-            st.divider()
-            
-            for u in users:
-                r_u1, r_u2, r_u3, r_u4 = st.columns([2, 3, 2, 2])
-                r_u1.write(f"{u.first_name} {u.last_name}")
-                r_u2.write(u.email or "—")
-                r_u3.write(f"[Profile](https://strava.com/athletes/{u.strava_id})" if u.strava_id else "—")
-                r_u4.write(u.created_at.strftime("%Y-%m-%d %H:%M") if u.created_at else "—")
-        else:
-            st.info("No users found.")
-
-    elif choice == "Activities":
-        st.header("Activity Log")
-        activities = get_all(Activity)
-        if activities:
-            a_col1, a_col2, a_col3, a_col4 = st.columns([1, 2, 1, 2])
-            a_col1.markdown("**User ID**")
-            a_col2.markdown("**Challenge**")
-            a_col3.markdown("**Metric**")
-            a_col4.markdown("**Timestamp**")
-            st.divider()
-            
-            for a in activities:
-                r_a1, r_a2, r_a3, r_a4 = st.columns([1, 2, 1, 2])
-                r_a1.code(str(a.user_id)[:8])
-                r_a2.write(str(a.challenge_id)[:8])
-                r_a3.write(f"{a.current_elevation} m")
-                r_a4.write(a.timestamp.strftime("%Y-%m-%d %H:%M") if a.timestamp else "—")
-        else:
-            st.info("No recent activities.")
+        with tab_challenges:
+            challenges = get_all(Challenge)
+            if challenges:
+                ch1, ch2, ch3, ch4 = st.columns([3, 2, 3, 2])
+                ch1.markdown("**Title**")
+                ch2.markdown("**Elevation**")
+                ch3.markdown("**Modalities**")
+                ch4.markdown("**Start/End**")
+                st.divider()
+                for c in challenges:
+                    r1, r2, r3, r4 = st.columns([3, 2, 3, 2])
+                    r1.write(c.title)
+                    r2.write(f"{c.elevation:,.0f} m")
+                    r3.write(", ".join(c.modalidad or []))
+                    dates = f"{c.start_date.strftime('%Y-%m-%d')} / {c.end_date.strftime('%Y-%m-%d')}" if c.start_date and c.end_date else "—"
+                    r4.write(dates)
+            else:
+                st.info("No challenges found.")
 
 if __name__ == "__main__":
     main()

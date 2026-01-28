@@ -69,35 +69,9 @@ class User(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # App-specific (not in schema.rb but needed for MVP)
     everesting_id = Column(String, unique=True)
     total_elevation = Column(Float, default=0)
     is_active = Column(Boolean, default=True)
-    
-    def to_dict(self):
-        """Convert model to dictionary for API responses"""
-        return {
-            "id": str(self.id),
-            "_id": str(self.id),  # Keep _id for backward compatibility
-            "email": self.email,
-            "name": self.name,
-            "last_name": self.last_name,
-            "country": self.country,
-            "everesting_id": self.everesting_id,
-            "total_elevation": self.total_elevation or 0,
-            "strava_id": self.strava_id,
-            "strava_access_token": self.strava_access_token,
-            "strava_refresh_token": self.strava_refresh_token,
-            "strava_expires_at": self.strava_expires_at,
-            "has_athlete_profile": self.has_athlete_profile,
-            "gender": self.gender,
-            "birthdate": str(self.birthdate) if self.birthdate else None,
-            "preferred_discipline": self.preferred_discipline,
-            "bio": self.bio,
-            "is_active": self.is_active,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-        }
-
 
 class Activity(Base):
     """Activity model - matches the 'activities' table from schema.rb"""
@@ -126,26 +100,6 @@ class Activity(Base):
     
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    def to_dict(self):
-        # Local helper for time formatting
-        seconds = int(self.elapsed_time or 0)
-        h = seconds // 3600
-        m = (seconds % 3600) // 60
-        s = seconds % 60
-        time_str = f"{h}h {m}m {s}s" if h > 0 else f"{m}m {s}s"
-
-        return {
-            "id": str(self.id),
-            "user_id": str(self.user_id),
-            "strava_id": self.strava_id,
-            "name": self.climb_name or "Strava Activity",
-            "elevation_gain": int(self.elevation or 0),
-            "time": time_str,
-            "date": str(self.date),
-            "modality": self.modality,
-            "status": self.status
-        }
 
 
 class Challenge(Base):

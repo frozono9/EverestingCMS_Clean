@@ -1,25 +1,21 @@
 
 # database.py
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_TRANSACTION_POOLER")
 
-# --- Async Engine (for FastAPI) ---
-engine = create_async_engine(
-    DATABASE_URL, 
-    connect_args={"statement_cache_size": 0},
-    poolclass=NullPool
-)
-AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+# Ensure the URL is for sync connection (psycopg2)
+if DATABASE_URL:
+    if DATABASE_URL.startswith("postgresql+asyncpg://"):
+        DATABASE_URL = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+    elif DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://")
 
-# --- Sync Engine (for Streamlit) ---
-SYNC_DATABASE_URL = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
-sync_engine = create_engine(SYNC_DATABASE_URL, poolclass=NullPool)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sync_engine)
+engine = create_engine(DATABASE_URL, poolclass=NullPool)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
