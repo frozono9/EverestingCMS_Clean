@@ -287,7 +287,10 @@ def main():
         st.header("Collections Management")
         tab_view, tab_new, tab_modify = st.tabs(["📋 View Collections", "➕ Create Collection", "🔧 Modify Collection"])
         
-        collections = sorted(get_all(Collection), key=lambda c: (c.title.lower() != "featured", c.title.lower()))
+        collections = get_all(Collection)
+        # Always show "Featured" at the top
+        collections.sort(key=lambda x: x.title.lower() != "featured")
+        
         challenges = get_all(Challenge)
         challenge_map = {c.title: str(c.id) for c in challenges}
         id_to_title = {str(c.id): c.title for c in challenges}
@@ -435,7 +438,10 @@ def main():
                 st.info("No activities/challenges found.")
 
         with tab_collections:
-            collections = sorted(get_all(Collection), key=lambda c: (c.title.lower() != "featured", c.title.lower()))
+            collections = get_all(Collection)
+            # Always show "Featured" at the top
+            collections.sort(key=lambda x: x.title.lower() != "featured")
+            
             challenges = get_all(Challenge)
             id_to_title = {str(c.id): c.title for c in challenges}
             
