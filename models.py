@@ -125,3 +125,18 @@ class Collection(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title = Column(String, nullable=False)
     channel_ids = Column(ARRAY(String))
+
+
+class UserChallenge(Base):
+    """UserChallenge model - matches the 'user_challenges' table"""
+    __tablename__ = "user_challenges"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    challenge_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    status = Column(String, nullable=False, default="Active")
+    accepted_rules = Column(Boolean, default=True, nullable=False)
+    progress = Column(Float, default=0.0, nullable=False)
+    
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)

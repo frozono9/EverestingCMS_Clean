@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 from sqlalchemy import select, update, delete
 from database import SessionLocal
-from models import User, Activity, Challenge, Collection
+from models import User, Activity, Challenge, Collection, UserChallenge
 import uuid
 import os
 from dotenv import load_dotenv
@@ -154,11 +154,15 @@ def main():
         with SessionLocal() as session:
             challenge_count = session.query(Challenge).count()
             collection_count = session.query(Collection).count()
+            user_challenge_count = session.query(UserChallenge).count()
+            activity_count = session.query(Activity).count()
             user_count = session.query(User).count()
             
         st.markdown('<div class="metric-container">', unsafe_allow_html=True)
         st.markdown(f"**Challenges**: {challenge_count}")
         st.markdown(f"**Collections**: {collection_count}")
+        st.markdown(f"**User Enrollments**: {user_challenge_count}")
+        st.markdown(f"**Activities**: {activity_count}")
         st.markdown(f"**Users**: {user_count}")
         st.markdown('</div>', unsafe_allow_html=True)
         
@@ -357,8 +361,8 @@ def main():
     elif choice == "Database":
         st.header("Database Explorer")
         
-        tab_users, tab_activities, tab_collections, tab_challenges = st.tabs([
-            "👥 Users", "🚴 Activities", "📁 Collections", "🏔️ Challenges"
+        tab_users, tab_activities, tab_collections, tab_challenges, tab_enrollments = st.tabs([
+            "👥 Users", "🚴 Activities", "📁 Collections", "🏔️ Challenges", "🏆 Enrollments"
         ])
         
         with tab_users:
@@ -440,6 +444,32 @@ def main():
                     r4.write(dates)
             else:
                 st.info("No challenges found.")
+
+        with tab_enrollments:
+            enrollments = get_all(UserChallenge)
+            users = get_all(User)
+            challenges = get_all(Challenge)
+            
+            user_map = {u.id: f"{u.name} {u.last_name}" for u in users}
+            challenge_map = {c.id: c.title for c in challenges}
+            
+            if enrollments:
+                e_col1, e_col2, e_col3, e_col4, e_col5 = st.columns([2, 2, 1.5, 1.5, 2])
+                e_col1.markdown("**User**")
+                e_col2.markdown("**Challenge**")
+                e_col3.markdown("**Status**")
+                e_col4.markdown("**Progress**")
+                e_col5.markdown("**Joined Date**")
+                st.divider()
+                for e in enrollments:
+                    r_e1, r_e2, r_e3, r_e4, r_e5 = st.columns([2, 2, 1.5, 1.5, 2])
+                    r_e1.write(user_map.get(e.user_id, str(e.user_id)[:8]))
+                    r_e2.write(challenge_map.get(e.challenge_id, str(e.challenge_id)[:8]))
+                    r_e3.write(e.status)
+                    r_e4.write(f"{e.progress:.1f}%")
+                    r_e5.write(e.created_at.strftime("%Y-%m-%d %H:%M") if e.created_at else "—")
+            else:
+                st.info("No user enrollments found.")
 
 if __name__ == "__main__":
     main()
