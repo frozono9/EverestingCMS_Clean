@@ -166,9 +166,21 @@ def upload_image(file):
         st.error(f"Error uploading image: {e}")
         return None
 
+def ensure_featured_collection():
+    with SessionLocal() as session:
+        from sqlalchemy import func
+        featured = session.query(Collection).filter(func.lower(Collection.title) == "featured").first()
+        if not featured:
+            new_coll = Collection(title="Featured", channel_ids=[])
+            session.add(new_coll)
+            session.commit()
+
+
 def main():
     if not check_password():
         st.stop()
+    
+    ensure_featured_collection()
         
     st.title("🏔️ Everesting Admin")
     st.divider()
@@ -394,6 +406,9 @@ def main():
         tab_view, tab_new, tab_modify = st.tabs(["📋 View Collections", "➕ Create Collection", "🔧 Modify Collection"])
         
         collections = get_all(Collection)
+        # Always show "Featured" at the top
+        collections.sort(key=lambda x: x.title.lower() != "featured")
+        
         challenges = get_all(Challenge)
         challenge_map = {c.title: str(c.id) for c in challenges}
         id_to_title = {str(c.id): c.title for c in challenges}
@@ -416,12 +431,15 @@ def main():
                     r_c2.write(", ".join(titles) if titles else "—")
                     
                     with r_c3:
-                        st.markdown('<div class="del-btn">', unsafe_allow_html=True)
-                        if st.button("🗑️", key=f"del_coll_{c.id}", help="Delete collection"):
-                            delete_item(Collection, c.id)
-                            st.toast(f"Collection '{c.title}' removed")
-                            st.rerun()
-                        st.markdown('</div>', unsafe_allow_html=True)
+                        if c.title.lower() != "featured":
+                            st.markdown('<div class="del-btn">', unsafe_allow_html=True)
+                            if st.button("🗑️", key=f"del_coll_{c.id}", help="Delete collection"):
+                                delete_item(Collection, c.id)
+                                st.toast(f"Collection '{c.title}' removed")
+                                st.rerun()
+                            st.markdown('</div>', unsafe_allow_html=True)
+                        else:
+                            st.button("🔒", key=f"lock_coll_{c.id}", help="Featured collection cannot be deleted", disabled=True)
             else:
                 st.info("No collections defined.")
 
@@ -434,13 +452,15 @@ def main():
                     options=list(challenge_map.keys())
                 )
                 if st.form_submit_button("Create Collection"):
-                    if new_title:
+                    if not new_title:
+                        st.error("Name is required")
+                    elif new_title.lower() == "featured":
+                        st.error("The 'Featured' collection already exists and is managed automatically.")
+                    else:
                         new_ids = [challenge_map[t] for t in selected_challenges]
                         create_item(Collection, {"title": new_title, "channel_ids": new_ids})
                         st.toast("Collection created with selected challenges!", icon="📁")
                         st.rerun()
-                    else:
-                        st.error("Name is required")
 
         with tab_modify:
             if not collections:
@@ -453,28 +473,45 @@ def main():
                 
                 selected_coll = next(c for c in collections if c.title == selected_coll_title)
                 
+                is_featured = selected_coll.title.lower() == "featured"
+                
                 with st.form(f"modify_coll_{selected_coll.id}"):
-                    edit_title = st.text_input("Edit Name", value=selected_coll.title)
+                    if is_featured:
+                        st.info("This is the 'Featured' collection. You can only select one challenge.")
+                        edit_title = st.text_input("Edit Name (Locked)", value=selected_coll.title, disabled=True)
+                    else:
+                        edit_title = st.text_input("Edit Name", value=selected_coll.title)
+                        
                     current_ids = getattr(selected_coll, "channel_ids", []) or []
                     current_titles = [id_to_title.get(cid, cid) for cid in current_ids if cid in id_to_title]
                     
-                    edit_challenges = st.multiselect(
-                        "Modify Included Challenges",
-                        options=list(challenge_map.keys()),
-                        default=current_titles
-                    )
+                    if is_featured:
+                        selected_title = st.selectbox(
+                            "Featured Challenge",
+                            options=["None"] + list(challenge_map.keys()),
+                            index=0 if not current_titles or current_titles[0] not in challenge_map 
+                                  else list(challenge_map.keys()).index(current_titles[0]) + 1
+                        )
+                        new_ids = [challenge_map[selected_title]] if selected_title != "None" else []
+                    else:
+                        edit_challenges = st.multiselect(
+                            "Modify Included Challenges",
+                            options=list(challenge_map.keys()),
+                            default=current_titles
+                        )
+                        new_ids = [challenge_map[t] for t in edit_challenges]
                     
                     if st.form_submit_button("Save Changes"):
-                        new_ids = [challenge_map[t] for t in edit_challenges]
                         with SessionLocal() as session:
                             db_coll = session.get(Collection, selected_coll.id)
                             if db_coll:
-                                db_coll.title = edit_title
+                                if not is_featured:
+                                    db_coll.title = edit_title
                                 db_coll.channel_ids = new_ids
                                 session.commit()
-                                st.toast(f"Updated {edit_title}", icon="💾")
+                                st.toast(f"Updated {selected_coll.title}", icon="💾")
                                 st.rerun()
-
+                    
     elif choice == "Database":
         st.header("Database Explorer")
         
@@ -520,6 +557,9 @@ def main():
 
         with tab_collections:
             collections = get_all(Collection)
+            # Always show "Featured" at the top
+            collections.sort(key=lambda x: x.title.lower() != "featured")
+            
             challenges = get_all(Challenge)
             id_to_title = {str(c.id): c.title for c in challenges}
             
@@ -536,10 +576,13 @@ def main():
                     titles = [id_to_title.get(cid, cid) for cid in channel_ids]
                     r2.write(", ".join(titles) if titles else "—")
                     with r3:
-                        if st.button("🗑️", key=f"db_del_coll_{c.id}"):
-                            delete_item(Collection, c.id)
-                            st.toast(f"Collection deleted", icon="🗑️")
-                            st.rerun()
+                        if c.title.lower() != "featured":
+                            if st.button("🗑️", key=f"db_del_coll_{c.id}"):
+                                delete_item(Collection, c.id)
+                                st.toast(f"Collection deleted", icon="🗑️")
+                                st.rerun()
+                        else:
+                            st.button("🔒", key=f"db_lock_coll_{c.id}", disabled=True)
             else:
                 st.info("No collections found.")
 
