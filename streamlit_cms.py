@@ -12,11 +12,19 @@ from supabase import create_client, Client
 load_dotenv()
 
 # Supabase setup for Storage
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-if SUPABASE_URL and not SUPABASE_URL.endswith("/"):
-    SUPABASE_URL += "/"
-SUPABASE_KEY = os.getenv("SUPABASE_SECRET") or os.getenv("SUPABASE_ANON_PUBLIC")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+def get_supabase_client():
+    url = os.getenv("SUPABASE_URL") or st.secrets.get("SUPABASE_URL")
+    key = os.getenv("SUPABASE_SECRET") or os.getenv("SUPABASE_ANON_PUBLIC") or st.secrets.get("SUPABASE_SECRET") or st.secrets.get("SUPABASE_ANON_PUBLIC")
+    
+    if not url or not key:
+        return None
+        
+    if url and not url.endswith("/"):
+        url += "/"
+    return create_client(url, key)
+
+supabase = get_supabase_client()
+
 
 # Page config
 st.set_page_config(
@@ -144,6 +152,9 @@ def delete_item(model, item_id):
 
 def upload_image(file):
     """Uploads an image to Supabase Storage and returns the public URL."""
+    if not supabase:
+        st.error("Supabase client not initialized. Check your secrects/environment variables.")
+        return None
     try:
         file_ext = file.name.split(".")[-1]
         file_name = f"{uuid.uuid4()}.{file_ext}"
