@@ -7,8 +7,16 @@ from models import User, Activity, Challenge, Collection, UserChallenge
 import uuid
 import os
 from dotenv import load_dotenv
+from supabase import create_client, Client
 
 load_dotenv()
+
+# Supabase setup for Storage
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+if SUPABASE_URL and not SUPABASE_URL.endswith("/"):
+    SUPABASE_URL += "/"
+SUPABASE_KEY = os.getenv("SUPABASE_SECRET") or os.getenv("SUPABASE_ANON_PUBLIC")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Page config
 st.set_page_config(
@@ -68,7 +76,7 @@ st.markdown("""
 
 # Constants
 MODALITY_OPTIONS = ["Bicycle", "Running", "Skiing", "Multisport", "Hiking", "Walking"]
-LABEL_OPTIONS = ["Beginner", "Amateur", "Pro", "Legend", "Easy", "Difficult", "Expert", "Hardcore"]
+LABEL_OPTIONS = ["All levels", "Beginner", "Amateur", "Pro", "Legend", "Easy", "Difficult", "Expert", "Hardcore"]
 
 def check_password():
     """Returns `True` if the user had the correct password."""
@@ -134,6 +142,30 @@ def delete_item(model, item_id):
             session.delete(item)
             session.commit()
 
+def upload_image(file):
+    """Uploads an image to Supabase Storage and returns the public URL."""
+    try:
+        file_ext = file.name.split(".")[-1]
+        file_name = f"{uuid.uuid4()}.{file_ext}"
+        bucket_name = "challenge_headers"
+        
+        # Ensure bucket exists (this might fail if we don't have permissions, 
+        # but usually we assume it's set up)
+        # Using service role key is best for this
+        
+        res = supabase.storage.from_(bucket_name).upload(
+            path=file_name,
+            file=file.getvalue(),
+            file_options={"content-type": file.type}
+        )
+        
+        # Get public URL
+        url_res = supabase.storage.from_(bucket_name).get_public_url(file_name)
+        return url_res
+    except Exception as e:
+        st.error(f"Error uploading image: {e}")
+        return None
+
 def main():
     if not check_password():
         st.stop()
@@ -178,7 +210,12 @@ def main():
     if choice == "Challenges":
         st.header("Challenges")
         
-        tab_list, tab_create = st.tabs(["📋 View All", "➕ Create New"])
+        # New "Events" logic (treating as a search filter or specific section if exists)
+        # Note: Added editable events as part of Challenges since they share the same model 
+        # but often referred to as Events in UI instructions.
+        
+        challenges = get_all(Challenge)
+        tab_list, tab_create, tab_edit = st.tabs(["📋 View All", "➕ Create New", "🔧 Edit Challenge"])
         
         with tab_list:
             sc1, sc2 = st.columns([5, 1])
@@ -188,8 +225,6 @@ def main():
                 st.write("##")
                 if st.button("Reset"):
                     st.rerun()
-                    
-            challenges = get_all(Challenge)
             
             if challenges:
                 filtered_challenges = [
@@ -202,7 +237,7 @@ def main():
                 if filtered_challenges:
                     # Header Row
                     h_col1, h_col2, h_col3, h_col4, h_col5, h_col6 = st.columns([3, 1.5, 2, 2, 2, 0.5])
-                    h_col1.markdown("**Title**")
+                    h_col1.markdown("**Title / Tagline**")
                     h_col2.markdown("**Elevation**")
                     h_col3.markdown("**Modalities**")
                     h_col4.markdown("**Labels**")
@@ -212,7 +247,10 @@ def main():
 
                     for c in filtered_challenges:
                         r_col1, r_col2, r_col3, r_col4, r_col5, r_col6 = st.columns([3, 1.5, 2, 2, 2, 0.5])
-                        r_col1.write(c.title)
+                        r_col1.markdown(f"**{c.title}**")
+                        if getattr(c, 'tagline', None):
+                            r_col1.caption(c.tagline)
+                            
                         r_col2.write(f"{c.elevation:,.0f} m")
                         r_col3.write(", ".join(getattr(c, "modalidad", []) or []))
                         r_col4.write(", ".join(getattr(c, "labels", []) or []))
@@ -238,12 +276,19 @@ def main():
                 col1, col2 = st.columns(2)
                 with col1:
                     title = st.text_input("Title", placeholder="e.g. Winter Peak 2026")
-                    foto = st.text_input("Header Image URL")
+                    tagline = st.text_input("Tagline", placeholder="e.g. Conquer the highest heights")
                     elevation = st.number_input("Target Elevation (m)", min_value=0.0, step=100.0)
                 with col2:
                     start_date = st.date_input("Start Date")
                     end_date = st.date_input("End Date")
-                    
+                
+                st.write("---")
+                img_col1, img_col2 = st.columns([1, 1])
+                with img_col1:
+                    foto_url = st.text_input("Header Image URL (Optional if uploading)")
+                with img_col2:
+                    uploaded_file = st.file_uploader("Or Upload Header Image", type=["jpg", "jpeg", "png", "webp"])
+                
                 description = st.text_area("Description")
                 rules = st.text_area("Rules & Regulations")
                 
@@ -257,9 +302,15 @@ def main():
                     if not title:
                         st.error("Title is required")
                     else:
+                        final_foto = foto_url
+                        if uploaded_file:
+                            st.info("Uploading image...")
+                            final_foto = upload_image(uploaded_file)
+                        
                         data = {
                             "title": title,
-                            "foto": foto,
+                            "tagline": tagline,
+                            "foto": final_foto,
                             "description": description,
                             "rules": rules,
                             "elevation": elevation,
@@ -271,6 +322,72 @@ def main():
                         create_item(Challenge, data)
                         st.toast("Challenge created successfully!", icon="✅")
                         st.rerun()
+
+        with tab_edit:
+            if not challenges:
+                st.info("No challenges to edit.")
+            else:
+                challenge_to_edit_title = st.selectbox(
+                    "Select Challenge to Modify",
+                    options=[c.title for c in challenges],
+                    key="edit_ch_select"
+                )
+                
+                ch = next(c for c in challenges if c.title == challenge_to_edit_title)
+                
+                with st.form(f"edit_challenge_form_{ch.id}"):
+                    st.subheader(f"Editing: {ch.title}")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        edit_title = st.text_input("Title", value=ch.title)
+                        edit_tagline = st.text_input("Tagline", value=getattr(ch, 'tagline', "") or "")
+                        edit_elevation = st.number_input("Target Elevation (m)", min_value=0.0, value=float(ch.elevation or 0), step=100.0)
+                    with col2:
+                        edit_start = st.date_input("Start Date", value=ch.start_date.date() if ch.start_date else None)
+                        edit_end = st.date_input("End Date", value=ch.end_date.date() if ch.end_date else None)
+                    
+                    st.write("---")
+                    st.caption(f"Current Image: {ch.foto or 'None'}")
+                    img_col1, img_col2 = st.columns([1, 1])
+                    with img_col1:
+                        edit_foto_url = st.text_input("Update Header Image URL", value=ch.foto or "")
+                    with img_col2:
+                        edit_uploaded_file = st.file_uploader("Or Upload New Image", type=["jpg", "jpeg", "png", "webp"], key=f"edit_up_{ch.id}")
+                    
+                    edit_description = st.text_area("Description", value=ch.description or "")
+                    edit_rules = st.text_area("Rules & Regulations", value=ch.rules or "")
+                    
+                    col_m, col_l = st.columns(2)
+                    with col_m:
+                        edit_modalidad = st.multiselect("Allowed Modalities", options=MODALITY_OPTIONS, default=ch.modalidad or [])
+                    with col_l:
+                        edit_labels = st.multiselect("Complexity Labels", options=LABEL_OPTIONS, default=ch.labels or [])
+                    
+                    if st.form_submit_button("Save Changes"):
+                        with SessionLocal() as session:
+                            db_ch = session.get(Challenge, ch.id)
+                            if db_ch:
+                                final_foto = edit_foto_url
+                                if edit_uploaded_file:
+                                    st.info("Uploading new image...")
+                                    uploaded_url = upload_image(edit_uploaded_file)
+                                    if uploaded_url:
+                                        final_foto = uploaded_url
+                                
+                                db_ch.title = edit_title
+                                db_ch.tagline = edit_tagline
+                                db_ch.foto = final_foto
+                                db_ch.description = edit_description
+                                db_ch.rules = edit_rules
+                                db_ch.elevation = edit_elevation
+                                db_ch.start_date = pd.to_datetime(edit_start).to_pydatetime()
+                                db_ch.end_date = pd.to_datetime(edit_end).to_pydatetime()
+                                db_ch.modalidad = edit_modalidad
+                                db_ch.labels = edit_labels
+                                
+                                session.commit()
+                                st.toast(f"Updated {edit_title}", icon="💾")
+                                st.rerun()
 
     elif choice == "Collections":
         st.header("Collections Management")
