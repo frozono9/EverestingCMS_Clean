@@ -2,7 +2,7 @@
 import streamlit as st
 import pandas as pd
 from sqlalchemy import select, update, delete
-from database import SessionLocal
+from database import SessionLocal, engine
 from models import User, Activity, Challenge, Collection, UserChallenge
 import uuid
 import os
@@ -10,6 +10,13 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 
 load_dotenv()
+
+# Run database migrations
+try:
+    from add_strava_id_column import add_strava_id_column
+    add_strava_id_column(engine)
+except Exception as e:
+    print(f"Migration warning: {e}")
 
 # Supabase setup for Storage
 def get_supabase_client():

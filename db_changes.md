@@ -2,7 +2,18 @@
 
 This document records the changes made to the database schema for the Everesting CMS.
 
-## 1. New Field: `tagline` in `challenges` Table
+## 1. New Field: `strava_id` in `activities` Table
+
+A new column `strava_id` has been added to the `activities` table to store the unique Strava activity identifier.
+
+- **Column Name:** `strava_id`
+- **Data Type:** `VARCHAR` (String in SQLAlchemy)
+- **Constraints:** UNIQUE, with index for performance
+- **Purpose:** To store the Strava activity ID for tracking and preventing duplicate imports.
+- **Implementation:** Added to `models.py` and applied to the database via `ALTER TABLE activities ADD COLUMN strava_id VARCHAR;` with unique index.
+- **Migration Script:** `add_strava_id_column.py`
+
+## 2. New Field: `tagline` in `challenges` Table
 
 A new column `tagline` has been added to the `challenges` table to provide a short, catchy description for each challenge.
 
